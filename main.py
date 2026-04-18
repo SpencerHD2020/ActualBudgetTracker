@@ -67,8 +67,8 @@ class DashboardPage(QWidget):
             self.figure.patch.set_facecolor("#F0F4F8")
             self.canvas = FigureCanvas(self.figure)
             self.canvas.setMinimumHeight(220)
-            self.canvas.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-            main_layout.addWidget(self.canvas)
+            self.canvas.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+            main_layout.addWidget(self.canvas, stretch=1)
         else:
             self.figure = None
             self.canvas = None
@@ -120,9 +120,31 @@ class DashboardPage(QWidget):
 
         self.figure.clear()
         ax = self.figure.add_subplot(111)
+        ax.set_facecolor("#F0F4F8")
+        for spine in ("top", "right"):
+            ax.spines[spine].set_visible(False)
+        for spine in ("bottom", "left"):
+            ax.spines[spine].set_color("#CBD5E0")
+        ax.set_title("Financial Overview", fontsize=11, fontweight="bold", pad=8, color="#2C3E50")
 
         labels = ["Balance", "After Bills", "CC Debt", "Net Available"]
         values = [account_balance, after_bills, cc_debt, net]
+
+        if all(v == 0 for v in values):
+            ax.text(
+                0.5, 0.5,
+                "No data yet — add transactions, bills, or credit cards to see your overview",
+                transform=ax.transAxes,
+                ha="center", va="center",
+                fontsize=10, color="#888",
+                wrap=True,
+            )
+            ax.set_xticks([])
+            ax.set_yticks([])
+            self.figure.tight_layout(pad=1.2)
+            self.canvas.draw()
+            return
+
         colors = [
             self._CARD_COLORS["balance"],
             self._CARD_COLORS["after_bills"],
@@ -146,14 +168,8 @@ class DashboardPage(QWidget):
                 fontsize=8.5, fontweight="bold", color="#2C3E50",
             )
 
-        ax.set_title("Financial Overview", fontsize=11, fontweight="bold", pad=8, color="#2C3E50")
         ax.set_ylabel("Amount ($)", fontsize=9, color="#555")
         ax.tick_params(labelsize=8.5, colors="#555")
-        ax.set_facecolor("#F0F4F8")
-        for spine in ("top", "right"):
-            ax.spines[spine].set_visible(False)
-        for spine in ("bottom", "left"):
-            ax.spines[spine].set_color("#CBD5E0")
 
         self.figure.tight_layout(pad=1.2)
         self.canvas.draw()
