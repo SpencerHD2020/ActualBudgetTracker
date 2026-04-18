@@ -3,7 +3,7 @@ from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QTabWidget, QLabel, QLineEdit, QPushButton, QTableWidget, QTableWidgetItem,
     QDateEdit, QDoubleSpinBox, QTextEdit, QSpinBox, QMessageBox, QDialog,
-    QFormLayout
+    QFormLayout, QAbstractItemView
 )
 from PyQt6.QtCore import Qt, QDate
 from PyQt6.QtGui import QFont
@@ -127,7 +127,8 @@ class TransactionsPage(QWidget):
         # Table for transactions
         self.table = QTableWidget()
         self.table.setColumnCount(5)
-        self.table.setHorizontalHeaderLabels(["Date", "Description", "Amount", "Action", ""])
+        self.table.setHorizontalHeaderLabels(["Date", "Description", "Amount", "Delete", "Edit"])
+        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         layout.addWidget(self.table)
         
         self.setLayout(layout)
@@ -171,7 +172,64 @@ class TransactionsPage(QWidget):
             delete_btn = QPushButton("Delete")
             delete_btn.clicked.connect(lambda checked, tid=trans['id']: self.delete_transaction(tid))
             self.table.setCellWidget(row, 3, delete_btn)
+
+            edit_btn = QPushButton("Edit")
+            edit_btn.clicked.connect(lambda checked, t=trans: self.edit_transaction(t))
+            self.table.setCellWidget(row, 4, edit_btn)
     
+    def edit_transaction(self, trans: dict):
+        """Open a dialog to edit an existing transaction."""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Edit Transaction")
+        layout = QFormLayout()
+
+        date_input = QDateEdit()
+        date_input.setDate(QDate.fromString(trans['date'], "yyyy-MM-dd"))
+        layout.addRow("Date:", date_input)
+
+        desc_input = QLineEdit(trans['description'])
+        layout.addRow("Description:", desc_input)
+
+        amount_input = QDoubleSpinBox()
+        amount_input.setRange(-1000000, 1000000)
+        amount_input.setDecimals(2)
+        amount_input.setSingleStep(0.01)
+        amount_input.setValue(trans['amount'])
+        layout.addRow("Amount:", amount_input)
+
+        btn_layout = QHBoxLayout()
+        save_btn = QPushButton("Save")
+        cancel_btn = QPushButton("Cancel")
+        btn_layout.addWidget(save_btn)
+        btn_layout.addWidget(cancel_btn)
+        layout.addRow(btn_layout)
+
+        dialog.setLayout(layout)
+
+        def save():
+            new_date = date_input.date().toString("yyyy-MM-dd")
+            new_desc = desc_input.text().strip()
+            new_amount = amount_input.value()
+
+            if not new_desc:
+                QMessageBox.warning(dialog, "Input Error", "Please enter a description")
+                return
+
+            old_amount = trans['amount']
+            database.update_transaction(trans['id'], new_date, new_desc, new_amount)
+            # Adjust account total by the difference
+            current_total = database.get_account_total()
+            database.set_account_total(current_total - old_amount + new_amount)
+
+            self.load_transactions()
+            if self.refresh_callback:
+                self.refresh_callback()
+            dialog.accept()
+
+        save_btn.clicked.connect(save)
+        cancel_btn.clicked.connect(dialog.reject)
+        dialog.exec()
+
     def delete_transaction(self, transaction_id: int):
         """Delete a transaction."""
         reply = QMessageBox.question(self, "Confirm Delete", "Delete this transaction?")
@@ -227,8 +285,9 @@ class BillsPage(QWidget):
         
         # Table for bills
         self.table = QTableWidget()
-        self.table.setColumnCount(4)
-        self.table.setHorizontalHeaderLabels(["Name", "Bi-Weekly Amount", "Description", "Action"])
+        self.table.setColumnCount(5)
+        self.table.setHorizontalHeaderLabels(["Name", "Bi-Weekly Amount", "Description", "Delete", "Edit"])
+        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         layout.addWidget(self.table)
         
         self.setLayout(layout)
@@ -269,7 +328,59 @@ class BillsPage(QWidget):
             delete_btn = QPushButton("Delete")
             delete_btn.clicked.connect(lambda checked, bid=bill['id']: self.delete_bill(bid))
             self.table.setCellWidget(row, 3, delete_btn)
+
+            edit_btn = QPushButton("Edit")
+            edit_btn.clicked.connect(lambda checked, b=bill: self.edit_bill(b))
+            self.table.setCellWidget(row, 4, edit_btn)
     
+    def edit_bill(self, bill: dict):
+        """Open a dialog to edit an existing bill."""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Edit Bill")
+        layout = QFormLayout()
+
+        name_input = QLineEdit(bill['name'])
+        layout.addRow("Bill Name:", name_input)
+
+        amount_input = QDoubleSpinBox()
+        amount_input.setRange(0, 1000000)
+        amount_input.setDecimals(2)
+        amount_input.setSingleStep(0.01)
+        amount_input.setValue(bill['amount_bi_weekly'])
+        layout.addRow("Bi-Weekly Amount:", amount_input)
+
+        desc_input = QLineEdit(bill['description'] or "")
+        layout.addRow("Description:", desc_input)
+
+        btn_layout = QHBoxLayout()
+        save_btn = QPushButton("Save")
+        cancel_btn = QPushButton("Cancel")
+        btn_layout.addWidget(save_btn)
+        btn_layout.addWidget(cancel_btn)
+        layout.addRow(btn_layout)
+
+        dialog.setLayout(layout)
+
+        def save():
+            new_name = name_input.text().strip()
+            new_amount = amount_input.value()
+            new_desc = desc_input.text().strip()
+
+            if not new_name:
+                QMessageBox.warning(dialog, "Input Error", "Please enter a bill name")
+                return
+
+            database.update_bill(bill['id'], new_name, new_amount, new_desc)
+
+            self.load_bills()
+            if self.refresh_callback:
+                self.refresh_callback()
+            dialog.accept()
+
+        save_btn.clicked.connect(save)
+        cancel_btn.clicked.connect(dialog.reject)
+        dialog.exec()
+
     def delete_bill(self, bill_id: int):
         """Delete a bill."""
         reply = QMessageBox.question(self, "Confirm Delete", "Delete this bill?")
@@ -313,8 +424,9 @@ class CreditCardsPage(QWidget):
         
         # Table for credit cards
         self.table = QTableWidget()
-        self.table.setColumnCount(3)
-        self.table.setHorizontalHeaderLabels(["Card Name", "Amount Owed", "Action"])
+        self.table.setColumnCount(4)
+        self.table.setHorizontalHeaderLabels(["Card Name", "Amount Owed", "Delete", "Edit"])
+        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         layout.addWidget(self.table)
         
         self.setLayout(layout)
@@ -352,7 +464,55 @@ class CreditCardsPage(QWidget):
             delete_btn = QPushButton("Delete")
             delete_btn.clicked.connect(lambda checked, ccid=card['id']: self.delete_card(ccid))
             self.table.setCellWidget(row, 2, delete_btn)
+
+            edit_btn = QPushButton("Edit")
+            edit_btn.clicked.connect(lambda checked, c=card: self.edit_card(c))
+            self.table.setCellWidget(row, 3, edit_btn)
     
+    def edit_card(self, card: dict):
+        """Open a dialog to edit an existing credit card entry."""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Edit Credit Card")
+        layout = QFormLayout()
+
+        name_input = QLineEdit(card['name'])
+        layout.addRow("Card Name:", name_input)
+
+        amount_input = QDoubleSpinBox()
+        amount_input.setRange(0, 1000000)
+        amount_input.setDecimals(2)
+        amount_input.setSingleStep(0.01)
+        amount_input.setValue(card['amount_owed'])
+        layout.addRow("Amount Owed:", amount_input)
+
+        btn_layout = QHBoxLayout()
+        save_btn = QPushButton("Save")
+        cancel_btn = QPushButton("Cancel")
+        btn_layout.addWidget(save_btn)
+        btn_layout.addWidget(cancel_btn)
+        layout.addRow(btn_layout)
+
+        dialog.setLayout(layout)
+
+        def save():
+            new_name = name_input.text().strip()
+            new_amount = amount_input.value()
+
+            if not new_name:
+                QMessageBox.warning(dialog, "Input Error", "Please enter a card name")
+                return
+
+            database.update_credit_card(card['id'], new_name, new_amount)
+
+            self.load_cards()
+            if self.refresh_callback:
+                self.refresh_callback()
+            dialog.accept()
+
+        save_btn.clicked.connect(save)
+        cancel_btn.clicked.connect(dialog.reject)
+        dialog.exec()
+
     def delete_card(self, cc_id: int):
         """Delete a credit card."""
         reply = QMessageBox.question(self, "Confirm Delete", "Delete this credit card entry?")
