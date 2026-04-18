@@ -8,8 +8,8 @@ source .venv/bin/activate
 echo "Installing dependencies..."
 python -m pip install -r requirements.txt > /dev/null 2>&1
 
-echo "Loading sample data..."
-python test_data.py
+echo "Initializing database..."
+python -c "import database; database.init_database()"
 
 echo ""
 echo "Launching application..."

@@ -65,10 +65,29 @@ Or with the venv:
 
 - **main.py**: Main application entry point and PyQt6 UI
 - **database.py**: SQLite database functions and business logic
+- **init_db.py**: Interactive CLI script for setting your real initial values
+- **wipe_db.py**: Utility script to wipe all data from the database
 - **cleanup.py**: Script for archiving old transactions
+- **test_data.py**: (Optional) Populate sample/demo data for testing
 - **budget.db**: SQLite database file (created on first run)
 
 ## Database Management
+
+### Initial Setup
+Set your real starting values (account balance, bills, credit cards) interactively:
+
+```bash
+python init_db.py
+```
+
+### Wiping the Database
+To clear all data from every table (transactions, bills, credit cards, account data):
+
+```bash
+python wipe_db.py
+```
+
+You will be asked to confirm before any data is deleted.
 
 ### Transaction Cleanup
 To delete transactions older than 2 years:
