@@ -3,158 +3,312 @@ from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QTabWidget, QLabel, QLineEdit, QPushButton, QTableWidget, QTableWidgetItem,
     QDateEdit, QDoubleSpinBox, QTextEdit, QSpinBox, QMessageBox, QDialog,
-    QFormLayout, QAbstractItemView
+    QFormLayout, QAbstractItemView, QFrame, QSizePolicy
 )
 from PyQt6.QtCore import Qt, QDate
-from PyQt6.QtGui import QFont
+from PyQt6.QtGui import QFont, QColor
 from datetime import datetime
 import database
 
+try:
+    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+    from matplotlib.figure import Figure
+    _MATPLOTLIB_AVAILABLE = True
+except ImportError:
+    _MATPLOTLIB_AVAILABLE = False
+
+_MAX_TRANSACTION_AMOUNT = 1_000_000
+
 class DashboardPage(QWidget):
     """Dashboard/home page showing totals overview."""
-    
+
+    _CARD_COLORS = {
+        "balance":    "#3498DB",
+        "after_bills": "#E67E22",
+        "cc_debt":    "#E74C3C",
+        "net":        "#27AE60",
+    }
+
     def __init__(self, refresh_callback=None):
         super().__init__()
         self.refresh_callback = refresh_callback
         self.init_ui()
         self.refresh_data()
-    
+
     def init_ui(self):
-        layout = QVBoxLayout()
-        
-        title = QLabel("Budget Dashboard")
-        title_font = QFont()
-        title_font.setPointSize(16)
-        title_font.setBold(True)
-        title.setFont(title_font)
-        layout.addWidget(title)
-        
-        # Create labels for each metric
-        self.total_amount_label = self._create_metric_label("Total Amount in Account", "$0.00")
-        self.after_bills_label = self._create_metric_label("After Bi-Weekly Bills", "$0.00")
-        self.cc_debt_label = self._create_metric_label("Total CC Debt", "$0.00")
-        self.net_available_label = self._create_metric_label("Net Available (After Bills & CC)", "$0.00")
-        
-        layout.addWidget(self.total_amount_label[0])
-        layout.addWidget(self.total_amount_label[1])
-        layout.addSpacing(20)
-        
-        layout.addWidget(self.after_bills_label[0])
-        layout.addWidget(self.after_bills_label[1])
-        layout.addSpacing(20)
-        
-        layout.addWidget(self.cc_debt_label[0])
-        layout.addWidget(self.cc_debt_label[1])
-        layout.addSpacing(20)
-        
-        layout.addWidget(self.net_available_label[0])
-        layout.addWidget(self.net_available_label[1])
-        
-        layout.addStretch()
-        
-        refresh_btn = QPushButton("Refresh")
+        self.setStyleSheet("background-color: #F0F4F8;")
+        main_layout = QVBoxLayout()
+        main_layout.setContentsMargins(24, 24, 24, 24)
+        main_layout.setSpacing(18)
+
+        # ── Title ────────────────────────────────────────────────────────────
+        title = QLabel("💰  Budget Dashboard")
+        title.setFont(QFont("Segoe UI", 20, QFont.Weight.Bold))
+        title.setStyleSheet("color: #2C3E50; background: transparent;")
+        main_layout.addWidget(title)
+
+        # ── Metric cards row ─────────────────────────────────────────────────
+        cards_row = QHBoxLayout()
+        cards_row.setSpacing(14)
+
+        self.total_card   = self._create_metric_card("Account Balance",      "$0.00", self._CARD_COLORS["balance"])
+        self.bills_card   = self._create_metric_card("After Bi-Weekly Bills","$0.00", self._CARD_COLORS["after_bills"])
+        self.cc_card      = self._create_metric_card("Total CC Debt",        "$0.00", self._CARD_COLORS["cc_debt"])
+        self.net_card     = self._create_metric_card("Net Available",        "$0.00", self._CARD_COLORS["net"])
+
+        for card_frame, _ in (self.total_card, self.bills_card, self.cc_card, self.net_card):
+            cards_row.addWidget(card_frame)
+
+        main_layout.addLayout(cards_row)
+
+        # ── Chart ────────────────────────────────────────────────────────────
+        if _MATPLOTLIB_AVAILABLE:
+            self.figure = Figure(figsize=(8, 3), dpi=80)
+            self.figure.patch.set_facecolor("#F0F4F8")
+            self.canvas = FigureCanvas(self.figure)
+            self.canvas.setMinimumHeight(220)
+            self.canvas.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+            main_layout.addWidget(self.canvas)
+        else:
+            self.figure = None
+            self.canvas = None
+
+        # ── Refresh button ───────────────────────────────────────────────────
+        refresh_btn = QPushButton("🔄  Refresh")
+        refresh_btn.setFixedWidth(120)
+        refresh_btn.setStyleSheet(
+            "QPushButton { background-color: #2C3E50; color: white; font-weight: bold; "
+            "border-radius: 6px; padding: 6px 14px; border: none; }"
+            "QPushButton:hover { background-color: #34495E; }"
+        )
         refresh_btn.clicked.connect(self.refresh_data)
-        layout.addWidget(refresh_btn)
-        
-        self.setLayout(layout)
-    
-    def _create_metric_label(self, title: str, value: str):
-        """Create a metric display with title and value."""
-        title_label = QLabel(title)
-        title_font = QFont()
-        title_font.setPointSize(11)
-        title_label.setFont(title_font)
-        
-        value_label = QLabel(value)
-        value_font = QFont()
-        value_font.setPointSize(14)
-        value_font.setBold(True)
-        value_label.setFont(value_font)
-        value_label.setStyleSheet("color: #0066CC;")
-        
-        return (title_label, value_label)
-    
+        main_layout.addWidget(refresh_btn, alignment=Qt.AlignmentFlag.AlignRight)
+
+        main_layout.addStretch()
+        self.setLayout(main_layout)
+
+    def _create_metric_card(self, title: str, value: str, color: str):
+        """Return (QFrame, value_QLabel) for a colored metric card."""
+        frame = QFrame()
+        frame.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        frame.setStyleSheet(
+            f"QFrame {{ background-color: {color}; border-radius: 10px; padding: 4px; }}"
+        )
+
+        vbox = QVBoxLayout()
+        vbox.setContentsMargins(14, 12, 14, 12)
+        vbox.setSpacing(4)
+
+        title_lbl = QLabel(title)
+        title_lbl.setFont(QFont("Segoe UI", 9))
+        title_lbl.setStyleSheet("color: rgba(255,255,255,200); background: transparent;")
+        title_lbl.setWordWrap(True)
+
+        value_lbl = QLabel(value)
+        value_lbl.setFont(QFont("Segoe UI", 17, QFont.Weight.Bold))
+        value_lbl.setStyleSheet("color: white; background: transparent;")
+
+        vbox.addWidget(title_lbl)
+        vbox.addWidget(value_lbl)
+        frame.setLayout(vbox)
+        return (frame, value_lbl)
+
+    def _update_chart(self, account_balance: float, after_bills: float, cc_debt: float, net: float):
+        """Redraw the matplotlib bar chart."""
+        if not _MATPLOTLIB_AVAILABLE or self.figure is None:
+            return
+
+        self.figure.clear()
+        ax = self.figure.add_subplot(111)
+
+        labels = ["Balance", "After Bills", "CC Debt", "Net Available"]
+        values = [account_balance, after_bills, cc_debt, net]
+        colors = [
+            self._CARD_COLORS["balance"],
+            self._CARD_COLORS["after_bills"],
+            self._CARD_COLORS["cc_debt"],
+            self._CARD_COLORS["net"] if net >= 0 else self._CARD_COLORS["cc_debt"],
+        ]
+
+        bars = ax.bar(labels, values, color=colors, edgecolor="white", linewidth=0.7, width=0.55)
+        ax.axhline(y=0, color="#2C3E50", linewidth=0.8, alpha=0.35)
+
+        for bar, val in zip(bars, values):
+            # get_height() returns the signed bar height: positive for income bars,
+            # negative for expense bars.  va places the label just outside the bar tip.
+            y_pos = bar.get_height()
+            va = "bottom" if val >= 0 else "top"
+            ax.text(
+                bar.get_x() + bar.get_width() / 2.0,
+                y_pos,
+                f"${val:,.0f}",
+                ha="center", va=va,
+                fontsize=8.5, fontweight="bold", color="#2C3E50",
+            )
+
+        ax.set_title("Financial Overview", fontsize=11, fontweight="bold", pad=8, color="#2C3E50")
+        ax.set_ylabel("Amount ($)", fontsize=9, color="#555")
+        ax.tick_params(labelsize=8.5, colors="#555")
+        ax.set_facecolor("#F0F4F8")
+        for spine in ("top", "right"):
+            ax.spines[spine].set_visible(False)
+        for spine in ("bottom", "left"):
+            ax.spines[spine].set_color("#CBD5E0")
+
+        self.figure.tight_layout(pad=1.2)
+        self.canvas.draw()
+
     def refresh_data(self):
         """Refresh all data from database."""
-        total_amount = database.get_account_total()
+        total_amount    = database.get_account_total()
         bi_weekly_bills = database.get_total_bi_weekly_bills()
-        cc_debt = database.get_total_cc_debt()
-        
-        after_bills = total_amount - bi_weekly_bills
+        cc_debt         = database.get_total_cc_debt()
+
+        after_bills   = total_amount - bi_weekly_bills
         net_available = total_amount - bi_weekly_bills - cc_debt
-        
-        self.total_amount_label[1].setText(f"${total_amount:,.2f}")
-        self.after_bills_label[1].setText(f"${after_bills:,.2f}")
-        self.cc_debt_label[1].setText(f"${cc_debt:,.2f}")
-        self.net_available_label[1].setText(f"${net_available:,.2f}")
+
+        self.total_card[1].setText(f"${total_amount:,.2f}")
+        self.bills_card[1].setText(f"${after_bills:,.2f}")
+        self.cc_card[1].setText(f"${cc_debt:,.2f}")
+        self.net_card[1].setText(f"${net_available:,.2f}")
+
+        # Colour net card red when negative
+        net_color = self._CARD_COLORS["net"] if net_available >= 0 else self._CARD_COLORS["cc_debt"]
+        self.net_card[0].setStyleSheet(
+            f"QFrame {{ background-color: {net_color}; border-radius: 10px; padding: 4px; }}"
+        )
+
+        self._update_chart(total_amount, after_bills, cc_debt, net_available)
 
 
 class TransactionsPage(QWidget):
     """Page for managing transactions."""
-    
+
     def __init__(self, refresh_callback=None):
         super().__init__()
         self.refresh_callback = refresh_callback
         self.init_ui()
         self.load_transactions()
-    
+
     def init_ui(self):
         layout = QVBoxLayout()
-        
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(10)
+
+        # Section title
+        form_title = QLabel("Add Transaction")
+        form_title.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
+        form_title.setStyleSheet("color: #2C3E50;")
+        layout.addWidget(form_title)
+
         # Form for adding transaction
         form_layout = QFormLayout()
-        
+        form_layout.setSpacing(8)
+
         self.date_input = QDateEdit()
         self.date_input.setDate(QDate.currentDate())
+        self.date_input.setCalendarPopup(True)
         form_layout.addRow("Date:", self.date_input)
-        
+
         self.description_input = QLineEdit()
         self.description_input.setPlaceholderText("e.g., Grocery store, Gas, Salary")
         form_layout.addRow("Description:", self.description_input)
-        
+
         self.amount_input = QDoubleSpinBox()
-        self.amount_input.setRange(-1000000, 1000000)
+        self.amount_input.setRange(0, _MAX_TRANSACTION_AMOUNT)
         self.amount_input.setSingleStep(0.01)
-        form_layout.addRow("Amount:", self.amount_input)
-        
+        form_layout.addRow("Amount ($):", self.amount_input)
+
+        # Income / Expense toggle switch
+        toggle_row = QHBoxLayout()
+        self.sign_toggle = QPushButton("➖  Expense")
+        self.sign_toggle.setCheckable(True)
+        self.sign_toggle.setChecked(False)   # False = Expense (negative), True = Income (positive)
+        self.sign_toggle.setFixedWidth(130)
+        self.sign_toggle.toggled.connect(self._on_sign_toggle)
+        self._on_sign_toggle(False)           # apply initial style
+        toggle_row.addWidget(self.sign_toggle)
+        toggle_row.addStretch()
+        form_layout.addRow("Type:", toggle_row)
+
         add_btn = QPushButton("Add Transaction")
+        add_btn.setStyleSheet(
+            "QPushButton { background-color: #2C3E50; color: white; font-weight: bold; "
+            "border-radius: 5px; padding: 6px 16px; border: none; }"
+            "QPushButton:hover { background-color: #34495E; }"
+        )
         add_btn.clicked.connect(self.add_transaction)
         form_layout.addRow(add_btn)
-        
+
         layout.addLayout(form_layout)
-        layout.addSpacing(20)
-        
+        layout.addSpacing(10)
+
         # Table for transactions
         self.table = QTableWidget()
         self.table.setColumnCount(5)
         self.table.setHorizontalHeaderLabels(["Date", "Description", "Amount", "Delete", "Edit"])
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.table.setAlternatingRowColors(True)
         layout.addWidget(self.table)
-        
+
         self.setLayout(layout)
-    
+
+    def _on_sign_toggle(self, is_income: bool):
+        """Update the toggle button appearance based on the transaction type.
+
+        The sign_toggle button is checkable:
+          - Unchecked (False) → Expense: the entered amount is stored as negative.
+          - Checked   (True)  → Income:  the entered amount is stored as positive.
+        """
+        if is_income:
+            self.sign_toggle.setText("➕  Income")
+            self.sign_toggle.setStyleSheet(
+                "QPushButton { background-color: #27AE60; color: white; font-weight: bold; "
+                "border-radius: 5px; padding: 4px 10px; border: none; }"
+                "QPushButton:hover { background-color: #229954; }"
+            )
+        else:
+            self.sign_toggle.setText("➖  Expense")
+            self.sign_toggle.setStyleSheet(
+                "QPushButton { background-color: #E74C3C; color: white; font-weight: bold; "
+                "border-radius: 5px; padding: 4px 10px; border: none; }"
+                "QPushButton:hover { background-color: #C0392B; }"
+            )
+
     def add_transaction(self):
         """Add a new transaction."""
         date = self.date_input.date().toString("yyyy-MM-dd")
         description = self.description_input.text().strip()
         amount = self.amount_input.value()
-        
+
         if not description:
             QMessageBox.warning(self, "Input Error", "Please enter a description")
             return
-        
+
+        if amount == 0:
+            QMessageBox.warning(self, "Input Error", "Please enter a non-zero amount")
+            return
+
+        # Income (checked) keeps the amount positive; Expense (unchecked) makes it negative.
+        if self.sign_toggle.isChecked():
+            pass          # Income — keep positive
+        else:
+            amount = -amount  # Expense — negate
+
         try:
             database.add_transaction(date, description, amount)
             # Update account total
             current_total = database.get_account_total()
             database.set_account_total(current_total + amount)
-            
+
+            # Clear form and reset toggle to Expense for fast batch entry
             self.description_input.clear()
             self.amount_input.setValue(0)
+            self.sign_toggle.setChecked(False)
             self.load_transactions()
             if self.refresh_callback:
                 self.refresh_callback()
-            QMessageBox.information(self, "Success", "Transaction added successfully!")
+            # No success dialog — allows rapid back-to-back entry
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to add transaction: {str(e)}")
     
@@ -162,13 +316,23 @@ class TransactionsPage(QWidget):
         """Load and display transactions."""
         transactions = database.get_all_transactions()
         self.table.setRowCount(len(transactions))
-        
+
+        green = QColor(39, 174, 96)
+
         for row, trans in enumerate(transactions):
-            self.table.setItem(row, 0, QTableWidgetItem(trans['date']))
-            self.table.setItem(row, 1, QTableWidgetItem(trans['description']))
+            date_item   = QTableWidgetItem(trans['date'])
+            desc_item   = QTableWidgetItem(trans['description'])
             amount_text = f"${trans['amount']:,.2f}"
-            self.table.setItem(row, 2, QTableWidgetItem(amount_text))
-            
+            amount_item = QTableWidgetItem(amount_text)
+
+            if trans['amount'] > 0:
+                for item in (date_item, desc_item, amount_item):
+                    item.setForeground(green)
+
+            self.table.setItem(row, 0, date_item)
+            self.table.setItem(row, 1, desc_item)
+            self.table.setItem(row, 2, amount_item)
+
             delete_btn = QPushButton("Delete")
             delete_btn.clicked.connect(lambda checked, tid=trans['id']: self.delete_transaction(tid))
             self.table.setCellWidget(row, 3, delete_btn)
@@ -185,13 +349,14 @@ class TransactionsPage(QWidget):
 
         date_input = QDateEdit()
         date_input.setDate(QDate.fromString(trans['date'], "yyyy-MM-dd"))
+        date_input.setCalendarPopup(True)
         layout.addRow("Date:", date_input)
 
         desc_input = QLineEdit(trans['description'])
         layout.addRow("Description:", desc_input)
 
         amount_input = QDoubleSpinBox()
-        amount_input.setRange(-1000000, 1000000)
+        amount_input.setRange(-_MAX_TRANSACTION_AMOUNT, _MAX_TRANSACTION_AMOUNT)
         amount_input.setDecimals(2)
         amount_input.setSingleStep(0.01)
         amount_input.setValue(trans['amount'])
@@ -268,7 +433,7 @@ class BillsPage(QWidget):
         form_layout.addRow("Bill Name:", self.name_input)
         
         self.amount_input = QDoubleSpinBox()
-        self.amount_input.setRange(0, 1000000)
+        self.amount_input.setRange(0, _MAX_TRANSACTION_AMOUNT)
         self.amount_input.setSingleStep(0.01)
         form_layout.addRow("Bi-Weekly Amount:", self.amount_input)
         
@@ -343,7 +508,7 @@ class BillsPage(QWidget):
         layout.addRow("Bill Name:", name_input)
 
         amount_input = QDoubleSpinBox()
-        amount_input.setRange(0, 1000000)
+        amount_input.setRange(0, _MAX_TRANSACTION_AMOUNT)
         amount_input.setDecimals(2)
         amount_input.setSingleStep(0.01)
         amount_input.setValue(bill['amount_bi_weekly'])
@@ -411,7 +576,7 @@ class CreditCardsPage(QWidget):
         form_layout.addRow("Card Name:", self.name_input)
         
         self.amount_input = QDoubleSpinBox()
-        self.amount_input.setRange(0, 1000000)
+        self.amount_input.setRange(0, _MAX_TRANSACTION_AMOUNT)
         self.amount_input.setSingleStep(0.01)
         form_layout.addRow("Amount Owed:", self.amount_input)
         
@@ -479,7 +644,7 @@ class CreditCardsPage(QWidget):
         layout.addRow("Card Name:", name_input)
 
         amount_input = QDoubleSpinBox()
-        amount_input.setRange(0, 1000000)
+        amount_input.setRange(0, _MAX_TRANSACTION_AMOUNT)
         amount_input.setDecimals(2)
         amount_input.setSingleStep(0.01)
         amount_input.setValue(card['amount_owed'])
