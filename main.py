@@ -134,7 +134,9 @@ class DashboardPage(QWidget):
         ax.axhline(y=0, color="#2C3E50", linewidth=0.8, alpha=0.35)
 
         for bar, val in zip(bars, values):
-            y_pos = bar.get_height()          # positive: top of bar; negative: bottom of bar
+            # get_height() returns the signed bar height: positive for income bars,
+            # negative for expense bars.  va places the label just outside the bar tip.
+            y_pos = bar.get_height()
             va = "bottom" if val >= 0 else "top"
             ax.text(
                 bar.get_x() + bar.get_width() / 2.0,
@@ -252,7 +254,12 @@ class TransactionsPage(QWidget):
         self.setLayout(layout)
 
     def _on_sign_toggle(self, is_income: bool):
-        """Update the toggle button appearance based on income/expense state."""
+        """Update the toggle button appearance based on the transaction type.
+
+        The sign_toggle button is checkable:
+          - Unchecked (False) → Expense: the entered amount is stored as negative.
+          - Checked   (True)  → Income:  the entered amount is stored as positive.
+        """
         if is_income:
             self.sign_toggle.setText("➕  Income")
             self.sign_toggle.setStyleSheet(
@@ -267,20 +274,26 @@ class TransactionsPage(QWidget):
                 "border-radius: 5px; padding: 4px 10px; border: none; }"
                 "QPushButton:hover { background-color: #C0392B; }"
             )
-    
+
     def add_transaction(self):
         """Add a new transaction."""
         date = self.date_input.date().toString("yyyy-MM-dd")
         description = self.description_input.text().strip()
         amount = self.amount_input.value()
 
-        # Apply sign based on toggle: Income = positive, Expense = negative
-        if not self.sign_toggle.isChecked():
-            amount = -amount
-
         if not description:
             QMessageBox.warning(self, "Input Error", "Please enter a description")
             return
+
+        if amount == 0:
+            QMessageBox.warning(self, "Input Error", "Please enter a non-zero amount")
+            return
+
+        # Income (checked) keeps the amount positive; Expense (unchecked) makes it negative.
+        if self.sign_toggle.isChecked():
+            pass          # Income — keep positive
+        else:
+            amount = -amount  # Expense — negate
 
         try:
             database.add_transaction(date, description, amount)
