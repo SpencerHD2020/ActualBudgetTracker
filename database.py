@@ -1,5 +1,7 @@
 import sqlite3
 import os
+import hashlib
+import secrets
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -58,7 +60,18 @@ def init_database():
             last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
-    
+
+    # Users table for authentication
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL UNIQUE,
+            password_hash TEXT NOT NULL,
+            salt TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
     conn.commit()
     conn.close()
 
@@ -308,3 +321,77 @@ def get_account_total() -> float:
     result = cursor.fetchone()
     conn.close()
     return result[0] if result else 0.0
+
+# ============================================================================
+# User Authentication Functions
+# ============================================================================
+
+def _hash_password(password: str, salt: str) -> str:
+    """Hash a password with the given salt using PBKDF2-HMAC-SHA256."""
+    key = hashlib.pbkdf2_hmac(
+        'sha256',
+        password.encode('utf-8'),
+        salt.encode('utf-8'),
+        iterations=260000,
+    )
+    return key.hex()
+
+def register_user(username: str, password: str) -> int:
+    """Register a new user. Returns the user ID, or raises ValueError if username exists."""
+    if not username or not username.strip():
+        raise ValueError("Username cannot be empty.")
+    if not password:
+        raise ValueError("Password cannot be empty.")
+    username = username.strip()
+    salt = secrets.token_hex(32)
+    password_hash = _hash_password(password, salt)
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute('''
+            INSERT INTO users (username, password_hash, salt)
+            VALUES (?, ?, ?)
+        ''', (username, password_hash, salt))
+        conn.commit()
+        user_id = cursor.lastrowid
+    except sqlite3.IntegrityError:
+        conn.close()
+        raise ValueError(f"Username '{username}' is already taken.")
+    conn.close()
+    return user_id
+
+def authenticate_user(username: str, password: str) -> bool:
+    """Return True if the username/password pair is valid, False otherwise."""
+    if not username or not password:
+        return False
+    username = username.strip()
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('SELECT password_hash, salt FROM users WHERE username = ?', (username,))
+    row = cursor.fetchone()
+    conn.close()
+    if row is None:
+        return False
+    stored_hash, salt = row['password_hash'], row['salt']
+    return _hash_password(password, salt) == stored_hash
+
+def get_user_count() -> int:
+    """Return the total number of registered users."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('SELECT COUNT(*) FROM users')
+    count = cursor.fetchone()[0]
+    conn.close()
+    return count
+
+def user_exists(username: str) -> bool:
+    """Return True if a user with the given username exists."""
+    if not username:
+        return False
+    username = username.strip()
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('SELECT 1 FROM users WHERE username = ?', (username,))
+    exists = cursor.fetchone() is not None
+    conn.close()
+    return exists

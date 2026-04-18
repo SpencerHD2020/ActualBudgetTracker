@@ -10,6 +10,192 @@ from PyQt6.QtGui import QFont
 from datetime import datetime
 import database
 
+
+class LoginDialog(QDialog):
+    """Dialog for user login and first-time registration."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Budget Tracker – Login")
+        self.setMinimumWidth(360)
+        self._authenticated = False
+        self._no_users = database.get_user_count() == 0
+        self._build_ui()
+
+    # ------------------------------------------------------------------
+    def _build_ui(self):
+        layout = QVBoxLayout()
+
+        title = QLabel("Budget Tracker")
+        title_font = QFont()
+        title_font.setPointSize(16)
+        title_font.setBold(True)
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title.setFont(title_font)
+        layout.addWidget(title)
+
+        if self._no_users:
+            subtitle = QLabel("No accounts found. Create your account to get started.")
+            subtitle.setWordWrap(True)
+            subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            layout.addWidget(subtitle)
+
+        form = QFormLayout()
+
+        self.username_input = QLineEdit()
+        self.username_input.setPlaceholderText("Username")
+        form.addRow("Username:", self.username_input)
+
+        self.password_input = QLineEdit()
+        self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.password_input.setPlaceholderText("Password")
+        form.addRow("Password:", self.password_input)
+
+        if self._no_users:
+            self.confirm_input = QLineEdit()
+            self.confirm_input.setEchoMode(QLineEdit.EchoMode.Password)
+            self.confirm_input.setPlaceholderText("Confirm password")
+            form.addRow("Confirm:", self.confirm_input)
+
+        layout.addLayout(form)
+        layout.addSpacing(10)
+
+        if self._no_users:
+            self.action_btn = QPushButton("Create Account")
+            self.action_btn.clicked.connect(self._register)
+        else:
+            self.action_btn = QPushButton("Log In")
+            self.action_btn.clicked.connect(self._login)
+
+        self.action_btn.setDefault(True)
+        layout.addWidget(self.action_btn)
+
+        if not self._no_users:
+            register_btn = QPushButton("Register New Account")
+            register_btn.setFlat(True)
+            register_btn.clicked.connect(self._open_register)
+            layout.addWidget(register_btn)
+
+        self.status_label = QLabel("")
+        self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.status_label.setStyleSheet("color: red;")
+        layout.addWidget(self.status_label)
+
+        self.setLayout(layout)
+
+    # ------------------------------------------------------------------
+    def _login(self):
+        username = self.username_input.text().strip()
+        password = self.password_input.text()
+        if not username or not password:
+            self.status_label.setText("Please enter username and password.")
+            return
+        if database.authenticate_user(username, password):
+            self._authenticated = True
+            self.accept()
+        else:
+            self.status_label.setText("Invalid username or password.")
+            self.password_input.clear()
+            self.password_input.setFocus()
+
+    def _register(self):
+        username = self.username_input.text().strip()
+        password = self.password_input.text()
+        confirm = self.confirm_input.text()
+        if not username or not password:
+            self.status_label.setText("Please fill in all fields.")
+            return
+        if password != confirm:
+            self.status_label.setText("Passwords do not match.")
+            self.confirm_input.clear()
+            return
+        if len(password) < 8:
+            self.status_label.setText("Password must be at least 8 characters.")
+            return
+        try:
+            database.register_user(username, password)
+            self._authenticated = True
+            self.accept()
+        except ValueError as exc:
+            self.status_label.setText(str(exc))
+
+    def _open_register(self):
+        reg = _RegisterDialog(self)
+        reg.exec()
+
+    # ------------------------------------------------------------------
+    def authenticated(self) -> bool:
+        return self._authenticated
+
+
+class _RegisterDialog(QDialog):
+    """Simple registration dialog (available from the login screen)."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Register New Account")
+        self.setMinimumWidth(320)
+        self._build_ui()
+
+    def _build_ui(self):
+        layout = QVBoxLayout()
+
+        form = QFormLayout()
+
+        self.username_input = QLineEdit()
+        self.username_input.setPlaceholderText("Choose a username")
+        form.addRow("Username:", self.username_input)
+
+        self.password_input = QLineEdit()
+        self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.password_input.setPlaceholderText("Choose a password (min 8 chars)")
+        form.addRow("Password:", self.password_input)
+
+        self.confirm_input = QLineEdit()
+        self.confirm_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.confirm_input.setPlaceholderText("Confirm password")
+        form.addRow("Confirm:", self.confirm_input)
+
+        layout.addLayout(form)
+        layout.addSpacing(10)
+
+        register_btn = QPushButton("Register")
+        register_btn.setDefault(True)
+        register_btn.clicked.connect(self._register)
+        layout.addWidget(register_btn)
+
+        self.status_label = QLabel("")
+        self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.status_label.setStyleSheet("color: red;")
+        layout.addWidget(self.status_label)
+
+        self.setLayout(layout)
+
+    def _register(self):
+        username = self.username_input.text().strip()
+        password = self.password_input.text()
+        confirm = self.confirm_input.text()
+        if not username or not password:
+            self.status_label.setText("Please fill in all fields.")
+            return
+        if password != confirm:
+            self.status_label.setText("Passwords do not match.")
+            self.confirm_input.clear()
+            return
+        if len(password) < 8:
+            self.status_label.setText("Password must be at least 8 characters.")
+            return
+        try:
+            database.register_user(username, password)
+            self.status_label.setStyleSheet("color: green;")
+            self.status_label.setText("Account created! You can now log in.")
+            self.username_input.clear()
+            self.password_input.clear()
+            self.confirm_input.clear()
+        except ValueError as exc:
+            self.status_label.setStyleSheet("color: red;")
+            self.status_label.setText(str(exc))
+
 class DashboardPage(QWidget):
     """Dashboard/home page showing totals overview."""
     
@@ -556,6 +742,14 @@ class BudgetApp(QMainWindow):
 
 def main():
     app = QApplication(sys.argv)
+
+    # Ensure the database is ready before showing the login dialog
+    database.init_database()
+
+    login = LoginDialog()
+    if login.exec() != QDialog.DialogCode.Accepted or not login.authenticated():
+        sys.exit(0)
+
     window = BudgetApp()
     window.show()
     sys.exit(app.exec())
